@@ -12,38 +12,21 @@
 # fine-tuning enabling code and other elements of the foregoing made publicly available
 # by Tencent in accordance with TENCENT HUNYUAN COMMUNITY LICENSE AGREEMENT.
 
-import numpy as np
 import trimesh
-# import xatlas
-import open3d as o3d
+import xatlas
 
-def mesh_uv_wrap(mesh, atlas_size=1024, gutter=2.0, max_stretch=0.1):
-    """
-    Compute per-vertex UVs on `mesh` using Open3D’s compute_uvatlas,
-    then write them back into the Trimesh object.
-    
-    Args:
-        mesh (trimesh.Scene or trimesh.Trimesh): input mesh.
-        atlas_size (int): texture resolution (width=height).
-        gutter (float): pixel padding around UV charts.
-        max_stretch (float): max allowed UV stretching [0..1].
-    
-    Returns:
-        trimesh.Trimesh: same mesh with updated mesh.visual.uv.
-    """
+
+def mesh_uv_wrap(mesh):
     if isinstance(mesh, trimesh.Scene):
         mesh = mesh.dump(concatenate=True)
 
     if len(mesh.faces) > 500000000:
         raise ValueError("The mesh has more than 500,000,000 faces, which is not supported.")
 
-    mesh.export("curr_mesh.obj")
-    legacy = o3d.io.read_triangle_mesh("curr_mesh.obj")
-    tmesh = o3d.t.geometry.TriangleMesh.from_legacy(legacy)
-    tmesh.compute_uvatlas(size=atlas_size, gutter=gutter, max_stretch=max_stretch, parallel_partitions=4, nthreads=0)
-    legacy_out = tmesh.to_legacy()
-    uvs = np.asarray(legacy_out.triangle_uvs).reshape(-1, 2)
+    vmapping, indices, uvs = xatlas.parametrize(mesh.vertices, mesh.faces)
 
+    mesh.vertices = mesh.vertices[vmapping]
+    mesh.faces = indices
     mesh.visual.uv = uvs
 
     return mesh
