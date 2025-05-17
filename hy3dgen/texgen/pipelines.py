@@ -186,7 +186,7 @@ class Hunyuan3DPaintPipeline:
         new_image.paste(cropped_image, (paste_x, paste_y))
         return new_image
 
-    def generate_multiview(self, mesh, image, selected_camera_elevs, selected_camera_azims):
+    def generate_multiview(self, mesh, image):
         if not isinstance(image, List):
             image = [image]
         images_prompt = []
@@ -202,11 +202,15 @@ class Hunyuan3DPaintPipeline:
         images_prompt = [self.models['delight_model'](image_prompt) for image_prompt in images_prompt]
 
         # make face_count into a var to input
-        mesh = mesh.simplify_quadric_decimation(face_count=500_000)
+        n_faces = mesh.faces.shape[0]
+        if n_faces > 250_000:
+            mesh = mesh.simplify_quadric_decimation(face_count=250_000)
         mesh = mesh_uv_wrap(mesh)
 
         self.render.load_mesh(mesh)
-        
+
+        selected_camera_elevs, selected_camera_azims, selected_view_weights = \
+            self.config.candidate_camera_elevs, self.config.candidate_camera_azims, self.config.candidate_view_weights
         normal_maps = self.render_normal_multiview(
             selected_camera_elevs, selected_camera_azims, use_abs_coor=True)
         position_maps = self.render_position_multiview(
@@ -215,20 +219,19 @@ class Hunyuan3DPaintPipeline:
         camera_info = [(((azim // 30) + 9) % 12) // {-20: 1, 0: 1, 20: 1, -90: 3, 90: 3}[
             elev] + {-20: 0, 0: 12, 20: 24, -90: 36, 90: 40}[elev] for azim, elev in
                        zip(selected_camera_azims, selected_camera_elevs)]
-        return self.models['multiview_model'](images_prompt, normal_maps + position_maps, camera_info)
+        multiviews = self.models['multiview_model'](images_prompt, normal_maps + position_maps, camera_info)
+        for i in range(len(multiviews)):
+            # multiviews[i] = self.models['super_model'](multiviews[i])
+            multiviews[i] = multiviews[i].resize(
+                (self.config.render_size, self.config.render_size))
+        return multiviews
 
     @torch.no_grad()
     def __call__(self, mesh, image):
         selected_camera_elevs, selected_camera_azims, selected_view_weights = \
             self.config.candidate_camera_elevs, self.config.candidate_camera_azims, self.config.candidate_view_weights
 
-
-        multiviews = self.generate_multiview(mesh, image, selected_camera_elevs, selected_camera_azims)
-
-        for i in range(len(multiviews)):
-            # multiviews[i] = self.models['super_model'](multiviews[i])
-            multiviews[i] = multiviews[i].resize(
-                (self.config.render_size, self.config.render_size))
+        multiviews = self.generate_multiview(mesh, image)
 
         texture, mask = self.bake_from_multiview(multiviews,
                                                  selected_camera_elevs, selected_camera_azims, selected_view_weights,
